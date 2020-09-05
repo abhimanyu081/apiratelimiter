@@ -1,7 +1,10 @@
 package com.abhimanyu.apiratelimiter.annotation;
 
+import com.abhimanyu.apiratelimiter.entity.TableUser;
 import com.abhimanyu.apiratelimiter.exception.ApiAccessCountExhausted;
+import com.abhimanyu.apiratelimiter.service.RateLimitingService;
 import com.abhimanyu.apiratelimiter.service.UserService;
+import com.abhimanyu.apiratelimiter.util.RateLimitTimeUnit;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -11,7 +14,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
@@ -25,7 +27,10 @@ public class RateLimitedAdvice {
     private static  final Logger LOGGER = LoggerFactory.getLogger(RateLimitedAdvice.class);
 
     @Autowired
-    UserService userService;
+    private UserService userService;
+
+    @Autowired
+    private RateLimitingService rateLimitingService;
 
 
     /**
@@ -39,8 +44,8 @@ public class RateLimitedAdvice {
     /**
      * All public methods of a class annotated with RateLimited.
      */
-    //@Pointcut("within(@com.abhimanyu.apiratelimiter.annotation.RateLimited *)")
-    @Pointcut("execution(* (@com.abhimanyu.apiratelimiter.annotation.RateLimited *).*(..))")
+    @Pointcut("within(@com.abhimanyu.apiratelimiter.annotation.RateLimited *)")
+    //@Pointcut("execution(* (@com.abhimanyu.apiratelimiter.annotation.RateLimited *).*(..))")
     public void rateLimitedAnnotatedMethodsInAClass() {
     }
 
@@ -51,11 +56,16 @@ public class RateLimitedAdvice {
     public void rateLimitPointCut() {
     }
 
+    /**
+     * controller layer
+     */
+    @Pointcut("within(com.abhimanyu.apiratelimiter.controller..*)")
+    public void inWebLayer() {}
+
     @Around("rateLimitPointCut()")
     public void rateLimitedAccess(ProceedingJoinPoint pjp) throws Throwable {
-
-        String currentUser = userService.getCurrentUserName();
-        LOGGER.info("Checking API access quota for the user {}",currentUser);
+        TableUser tableUser = userService.getLoggedInUser();
+        LOGGER.info("Checking API access quota for the user {}",tableUser.getName());
 
         try {
 
@@ -64,14 +74,24 @@ public class RateLimitedAdvice {
 
             RateLimited rateLimited = method.getAnnotation(RateLimited.class);
 
-            TimeUnit timeUnit = rateLimited.timeUnit();
+
+            if (rateLimited == null) {
+                rateLimited = pjp.getTarget().getClass()
+                        .getAnnotation(RateLimited.class);
+            }
+
+            RateLimitTimeUnit timeUnit = rateLimited.timeUnit();
             int apiAccessCountAllowed = rateLimited.accessCountPerTimeUnit();
 
             LOGGER.info("Time Unit = {}",TimeUnit.SECONDS.name());
             LOGGER.info("apiAccessCountAllowed = {}",apiAccessCountAllowed);
-            boolean isApiAccessAllowed = userService.checkApiAccessLimit(currentUser, apiAccessCountAllowed);
+
+            String apiUrl=null;//TODO
+
+            boolean isApiAccessAllowed = rateLimitingService.isApiAccessAllowed(timeUnit,
+                    apiAccessCountAllowed, tableUser, method.getName(), apiUrl);
             if (isApiAccessAllowed) {
-                LOGGER.info("Access allowed for the user {}",currentUser);
+                LOGGER.info("Access allowed for the user {}",tableUser.getName());
                 pjp.proceed();
             }
         } catch (ApiAccessCountExhausted e) {

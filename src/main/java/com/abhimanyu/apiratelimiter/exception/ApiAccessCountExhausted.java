@@ -1,6 +1,6 @@
 package com.abhimanyu.apiratelimiter.exception;
 
-public class ApiAccessCountExhausted extends Exception{
+public class ApiAccessCountExhausted extends RuntimeException{
 
     public ApiAccessCountExhausted(String message) {
         super(message);
